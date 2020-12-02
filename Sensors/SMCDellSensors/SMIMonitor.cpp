@@ -9,6 +9,8 @@
  */
 
 #include "SMIMonitor.hpp"
+#include "kern_hooks.hpp"
+
 #include <Headers/kern_cpu.hpp>
 
 extern "C" {
@@ -16,24 +18,30 @@ extern "C" {
 }
 
 SMIMonitor *SMIMonitor::instance = nullptr;
+atomic_bool SMIMonitor::busy = 0;
 
 OSDefineMetaClassAndStructors(SMIMonitor, OSObject)
 
 int SMIMonitor::i8k_smm(SMMRegisters *regs) {
 	int rc;
 	int eax = regs->eax;  //input value
+
+	while (atomic_load_explicit(&KERNELHOOKS::active_output, memory_order_acquire)) { IOSleep(4); }
+
+	atomic_store_explicit(&busy, true, memory_order_release);
 	
-	IOSimpleLockLock(preemptionLock);
-	
+	if (atomic_load_explicit(&KERNELHOOKS::active_output, memory_order_acquire)) {
+		//SYSLOG("sdell", "break access smm, active_outputs = %d", atomic_load_explicit(&KERNELHOOKS::active_output, memory_order_acquire));
+		atomic_store_explicit(&busy, false, memory_order_release);
+		return -1;
+	}
+
 #if __LP64__
 	asm volatile("pushq %%rax\n\t"
 			"movl 0(%%rax),%%edx\n\t"
 			"pushq %%rdx\n\t"
 			"movl 4(%%rax),%%ebx\n\t"
 			"movl 8(%%rax),%%ecx\n\t"
-			"movl 12(%%rax),%%edx\n\t"
-			"movl 16(%%rax),%%esi\n\t"
-			"movl 20(%%rax),%%edi\n\t"
 			"popq %%rax\n\t"
 			"out %%al,$0xb2\n\t"
 			"out %%al,$0x84\n\t"
@@ -41,8 +49,6 @@ int SMIMonitor::i8k_smm(SMMRegisters *regs) {
 			"movl %%ebx,4(%%rax)\n\t"
 			"movl %%ecx,8(%%rax)\n\t"
 			"movl %%edx,12(%%rax)\n\t"
-			"movl %%esi,16(%%rax)\n\t"
-			"movl %%edi,20(%%rax)\n\t"
 			"popq %%rdx\n\t"
 			"movl %%edx,0(%%rax)\n\t"
 			"pushfq\n\t"
@@ -50,16 +56,13 @@ int SMIMonitor::i8k_smm(SMMRegisters *regs) {
 			"andl $1,%%eax\n"
 			: "=a"(rc)
 			: "a"(regs)
-			: "%ebx", "%ecx", "%edx", "%esi", "%edi", "memory");
+			: "%ebx", "%ecx", "%edx", "memory");
 #else
 	asm volatile("pushl %%eax\n\t"
 			"movl 0(%%eax),%%edx\n\t"
 			"push %%edx\n\t"
 			"movl 4(%%eax),%%ebx\n\t"
 			"movl 8(%%eax),%%ecx\n\t"
-			"movl 12(%%eax),%%edx\n\t"
-			"movl 16(%%eax),%%esi\n\t"
-			"movl 20(%%eax),%%edi\n\t"
 			"popl %%eax\n\t"
 			"out %%al,$0xb2\n\t"
 			"out %%al,$0x84\n\t"
@@ -67,8 +70,6 @@ int SMIMonitor::i8k_smm(SMMRegisters *regs) {
 			"movl %%ebx,4(%%eax)\n\t"
 			"movl %%ecx,8(%%eax)\n\t"
 			"movl %%edx,12(%%eax)\n\t"
-			"movl %%esi,16(%%eax)\n\t"
-			"movl %%edi,20(%%eax)\n\t"
 			"popl %%edx\n\t"
 			"movl %%edx,0(%%eax)\n\t"
 			"lahf\n\t"
@@ -76,11 +77,11 @@ int SMIMonitor::i8k_smm(SMMRegisters *regs) {
 			"andl $1,%%eax\n"
 			: "=a"(rc)
 			: "a"(regs)
-			: "%ebx", "%ecx", "%edx", "%esi", "%edi", "memory");
+			: "%ebx", "%ecx", "%edx", "memory");
 #endif
 	
-	IOSimpleLockUnlock(preemptionLock);
-
+	atomic_store_explicit(&busy, false, memory_order_release);
+	
 	if ((rc != 0) || ((regs->eax & 0xffff) == 0xffff) || (regs->eax == eax)) {
 		return -1;
 	}
@@ -223,17 +224,35 @@ int SMIMonitor::i8k_set_fan(int fan, int speed) {
 }
 
 int SMIMonitor::i8k_set_fan_control_manual(int fan) {
+	// we have to write to both control registers since some Dell models
+	// support only one register and smm does not return error for unsupported one
 	SMMRegisters regs {};
 	regs.eax = I8K_SMM_IO_DISABLE_FAN_CTL1;
 	regs.ebx = (fan & 0xff);
-	return i8k_smm(&regs);
+	int result1 = i8k_smm(&regs);
+	
+	regs = {};
+	regs.eax = I8K_SMM_IO_DISABLE_FAN_CTL2;
+	regs.ebx = (fan & 0xff);
+	int result2 = i8k_smm(&regs);
+	
+	return (result1 >= 0) ? result1 : result2;
 }
 
 int SMIMonitor::i8k_set_fan_control_auto(int fan) {
+	// we have to write to both control registers since some Dell models
+	// support only one register and smm does not return error for unsupported one
 	SMMRegisters regs {};
 	regs.eax = I8K_SMM_IO_ENABLE_FAN_CTL1;
 	regs.ebx = (fan & 0xff);
-	return i8k_smm(&regs);
+	int result1 = i8k_smm(&regs);
+	
+	regs = {};
+	regs.eax = I8K_SMM_IO_ENABLE_FAN_CTL2;
+	regs.ebx = (fan & 0xff);
+	int result2 = i8k_smm(&regs);
+
+	return (result1 >= 0) ? result1 : result2;
 }
 
 void SMIMonitor::createShared() {
@@ -259,7 +278,7 @@ void SMIMonitor::createShared() {
 bool SMIMonitor::probe() {
 
 	bool success = true;
-	
+
 	while (!updateCall) {
 		updateCall = thread_call_allocate(staticUpdateThreadEntry, this);
 		if (!updateCall) {
@@ -267,7 +286,7 @@ bool SMIMonitor::probe() {
 			success = false;
 			break;
 		}
-		
+
 		IOLockLock(mainLock);
 		thread_call_enter(updateCall);
 		
@@ -292,7 +311,7 @@ bool SMIMonitor::probe() {
 			updateCall = nullptr;
 		}
 	}
-	
+
 	DBGLOG("sdell", "Based on I8kfan project and adopted to VirtualSMC plugin");
 
 	return success;
@@ -319,7 +338,7 @@ bool SMIMonitor::postSmcUpdate(SMC_KEY key, size_t index, const void *data, uint
 
 	bool success = false;
 	while (1) {
-	
+
 		if (dataSize > sizeof(StoredSmcUpdate::data)) {
 			SYSLOG("sdell", "postRequest dataSize overflow %u", dataSize);
 			break;
@@ -365,17 +384,17 @@ IOReturn SMIMonitor::bindCurrentThreadToCpu0()
 	// Obtain power management callbacks 10.7+
 	pmCallBacks_t callbacks {};
 	pmKextRegister(PM_DISPATCH_VERSION, nullptr, &callbacks);
-	
+
 	if (!callbacks.LCPUtoProcessor) {
 		SYSLOG("sdell", "failed to obtain LCPUtoProcessor");
 		return KERN_FAILURE;
 	}
-	
+
 	if (!callbacks.ThreadBind) {
 		SYSLOG("sdell", "failed to obtain ThreadBind");
 		return KERN_FAILURE;
 	}
-	
+
 	if (!IOSimpleLockTryLock(preemptionLock)) {
 		SYSLOG("sdell", "Preemption cannot be disabled before performing ThreadBind");
 		return KERN_FAILURE;
@@ -383,7 +402,7 @@ IOReturn SMIMonitor::bindCurrentThreadToCpu0()
 
 	bool success = true;
 	auto enable = ml_set_interrupts_enabled(FALSE);
-	
+
 	while (1)
 	{
 		auto processor = callbacks.LCPUtoProcessor(0);
@@ -540,7 +559,7 @@ void SMIMonitor::updateSensorsLoop() {
 			handleSmcUpdatesInIdle(4);
 		}
 		
-		handleSmcUpdatesInIdle(10);
+		handleSmcUpdatesInIdle(5);
 	}
 }
 
@@ -548,7 +567,7 @@ void SMIMonitor::handleSmcUpdatesInIdle(int idle_loop_count)
 {
 	for (int i=0; i<idle_loop_count; ++i)
 	{
-		if (awake) {
+		if (awake && storedSmcUpdates.size() != 0) {
 			IOSimpleLockLock(queueLock);
 			if (storedSmcUpdates.size() > 0) {
 				StoredSmcUpdate update = storedSmcUpdates[0];
@@ -572,7 +591,7 @@ void SMIMonitor::handleSmcUpdatesInIdle(int idle_loop_count)
 			}
 		}
 
-		IOSleep(50);
+		IOSleep(100);
 	}
 }
 

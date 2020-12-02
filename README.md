@@ -1,9 +1,12 @@
 VirtualSMC
 ========
-
-[![Build Status](https://travis-ci.com/acidanthera/VirtualSMC.svg?branch=master)](https://travis-ci.com/acidanthera/VirtualSMC) [![Scan Status](https://scan.coverity.com/projects/16571/badge.svg?flat=1)](https://scan.coverity.com/projects/16571)
+test
+[![Build Status](https://github.com/acidanthera/VirtualSMC/workflows/CI/badge.svg?branch=master)](https://github.com/acidanthera/VirtualSMC/actions) [![Scan Status](https://scan.coverity.com/projects/16571/badge.svg?flat=1)](https://scan.coverity.com/projects/16571)
 
 Advanced Apple SMC emulator in the kernel. Requires [Lilu](https://github.com/vit9696/Lilu) for full functioning.
+
+English (Current)  
+[简体中文](README_zh.md)  
 
 #### Features
 - Supports 64-bit macOS 10.6 and newer (10.9 and newer is recommended)
@@ -17,7 +20,7 @@ Advanced Apple SMC emulator in the kernel. Requires [Lilu](https://github.com/vi
 #### Boot arguments
 - Add `-vsmcdbg` to enable debug printing (available in DEBUG binaries).
 - Add `-vsmcoff` to switch off all the Lilu enhancements.
-- Add `-vsmcbeta` to enable Lilu enhancements on unsupported OS (11.0 and below are enabled by default).
+- Add `-vsmcbeta` to enable Lilu enhancements on unsupported OS (11 and below are enabled by default).
 - Add `-vsmcrpt` to report about missing SMC keys to the system log.
 - Add `-vsmccomp` to prefer existing hardware SMC implementation if found.
 - Add `vsmcgen=X` to force exposing X-gen SMC device (1 and 2 are supported).
@@ -34,7 +37,7 @@ Advanced Apple SMC emulator in the kernel. Requires [Lilu](https://github.com/vi
 - [07151129](https://github.com/07151129) for co-devoloping VirtualSMC and invaluable help during the research
 - [lvs1974](https://github.com/lvs1974) for developing laptop sensor support
 - [usr-sse2](https://github.com/usr-sse2) for developing laptop sensor support
-- [joedmru](https://github.com/joedmru) for developing fans and voltage sensor support
+- [joedmru](https://github.com/joedmru) for developing Super I/O chips support
 - [theopolis](https://github.com/theopolis) for [smc-fuzzer](https://github.com/theopolis/smc-fuzzer) tool
 - [kokke](https://github.com/kokke) for [tiny-AES-c](https://github.com/kokke/tiny-AES-c)
 - [vit9696](https://github.com/vit9696) for [Lilu.kext](https://github.com/vit9696/Lilu) and this software

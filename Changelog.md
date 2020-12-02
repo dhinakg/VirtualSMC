@@ -1,5 +1,13 @@
 VirtualSMC Changelog
 ====================
+#### v1.1.9
+- Improve manual fan control in SMCDellSensors (use control registers 0x35a3 and 0x34a3 to cover more Dell models)
+- Fix processKext in SMCDellSensors (could be called multiple times for the same kext since flag Reloadable was set)
+- Reduce audio lags in SMCDellSensors when USB audio device is used
+
+#### v1.1.8
+- Reduce audio lags in SMCDellSensors
+
 #### v1.1.7
 - Added MacKernelSDK with Xcode 12 compatibility
 - Fixed SMCDellSensors loading on macOS 10.8
